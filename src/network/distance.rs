@@ -7,6 +7,7 @@
 //! `distance` submodule contains all functionality required to calculcate
 //! the cherry distance on input networks. 
 //!
+//! `distance` submodule contains `DTree` type, representing the dependency tree
 //! 
 use std::hash::Hash;
 use std::fmt::Display;
@@ -15,22 +16,17 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::cmp;
 use std::iter::zip;
-use std::time::Instant;
-use std::time::Duration;
 use crate::network::Network;
 use crate::network::Node;
-use crate::network::Adj;
 
 #[derive(Clone)]
-pub struct DTree {//TODO pub for testing
+pub struct DTree {//pub for use in random
     tree: Network<Node<usize>>,//nodes are labelled with corresponding r val 
     id_i_map: BTreeMap<usize,usize>,//(k,v) = (ret id in net, node i in tree)
 }
 // --------------- main distance function
 pub fn find_cherry_distance_w_ranking<T: Clone + PartialEq + Eq + Hash + Ord + Display>
-    (n1: Network<Node<T>>, n2: Network<Node<T>>, t_pc: f32) -> (u32,Duration) { 
-    //start timer
-   let start = Instant::now();
+    (n1: Network<Node<T>>, n2: Network<Node<T>>, t_pc: f32) -> u32 { 
     //----------error checking and easy case
      //check n1
      if !n1.clone().is_acyclic() {panic!("network 1 is not acyclic");}
@@ -43,100 +39,6 @@ pub fn find_cherry_distance_w_ranking<T: Clone + PartialEq + Eq + Hash + Ord + D
      //easy cases
     let x1 = n1.get_cluster(0);let x2 = n2.get_cluster(0);
     let shared_x = x1.intersection(&x2).cloned().collect::<Vec<T>>().len();
-    let no_time = Instant::now().elapsed();
-    if shared_x == 0 {
-        panic!("networks must share at least 1 leaf label.")
-    } 
-    else if shared_x == 1 { 
-        let v1 = n1.get_n();
-        let v2 = n2.get_n();
-        //single-leaf network
-        return (((v1 + v2 - 2)/2).try_into().unwrap(),no_time)
-    } else if shared_x == 2 {
-        let v1 = n1.get_n();
-        let v2 = n2.get_n();
-        //cherry network
-        return (((v1 + v2 - 6)/2).try_into().unwrap(),no_time)
-    }
-    //------non-easy cases: more than 2 leaves are shared
-    //----------------------------PREPROCCESSING DTREES
-    //processing
-    let t1 = DTree::dep_tree_maker(&n1);
-    let t2 = DTree::dep_tree_maker(&n2);
-    let mut pairs = DTree::make_pairs(&t1, &n1, &t2, &n2);
-    let mut thresh_num = cmp::max(1 , ( t_pc * pairs.len() as f32 ) as usize);
-    pairs.sort_by(|t1, t2| t2.1.tree.get_n().cmp( &t1.1.tree.get_n() ) );
-    //pairs sorted from largest to smallest. 
-    //----------------------------DYNAMIC PROGRAMMING 
-    //---------------------------INCLUDES BUILDING RT SUBNETS from DTREES
-    //go
-    let n1_size = n1.get_n();
-    let n2_size = n2.get_n();
-    let mut n_pairs = 0; let mut simple_size = 0;
-    let mut all_nets_1:BTreeMap<String,Vec<Network<Node<T>>>> = BTreeMap::new();
-    let mut all_nets_2:BTreeMap<String,Vec<Network<Node<T>>>> = BTreeMap::new();
-    //processing
-    for (dt1, dt2) in pairs {
-        let key1 = dt1.make_key();
-        let key2 = dt2.make_key();
-        //find subnets for that subdtree, constructing them if not found
-        let rt_n1_set:Vec<Network<Node<T>>>;
-        let rt_n2_set:Vec<Network<Node<T>>>;
-        if all_nets_1.contains_key(&key1) {
-            rt_n1_set = all_nets_1.get(&key1).unwrap().clone();
-        } else {
-            rt_n1_set = dt1.rt_from_subd_maker(&t1,&n1);
-            all_nets_1.insert(key1,rt_n1_set.clone());
-        }
-        if all_nets_2.contains_key(&key2) {
-            rt_n2_set = all_nets_2.get(&key2).unwrap().clone();
-        } else {
-            rt_n2_set = dt2.rt_from_subd_maker(&t2,&n2);
-            all_nets_2.insert(key2,rt_n2_set.clone());
-        }
-        //match each from set with each other
-        for rt_n1 in &rt_n1_set {
-            for rt_n2 in &rt_n2_set {
-                n_pairs+=1;
-                //simple_size = n_pairs;//just here for testing
-                if let Some(candidate_simple_size) = find_simple_macrs_size(rt_n1,rt_n2) {
-                    //todo: here is where we stop after finding a possible solution
-                    if thresh_num > 0 {
-                        if simple_size < candidate_simple_size {
-                          simple_size = candidate_simple_size;
-                        }
-                        thresh_num -= 1;
-                    } else {
-                        if simple_size < candidate_simple_size {
-                            simple_size = candidate_simple_size;
-                        }
-                        let result = n1_size + n2_size - 2 * simple_size;
-                        return ((result/2).try_into().unwrap(),start.elapsed())
-                    }
-                }
-            }
-        }
-    }
-    //report results
-    let result = n1_size + n2_size - 2 * simple_size;
-    ((result/2).try_into().unwrap(),start.elapsed())
-}
-//public function that returns distance via smart_enum
-pub fn find_cherry_distance_exact<T: Clone + PartialEq + Eq + Hash + Ord + Display>
-    (n1: Network<Node<T>>, n2: Network<Node<T>>) -> u32 { 
-    //----------error checking and easy case
-     //check n1
-     if !n1.clone().is_acyclic() {panic!("network 1 is not acyclic");}
-     if !n1.clone().is_level_1() {panic!("network 1 is not level-1");}
-     if !n1.clone().is_binary() {panic!("network 1 is not binary");}
-     //check n2
-     if !n2.clone().is_acyclic() {panic!("network 2 is not acyclic");}
-     if !n2.clone().is_level_1() {println!("{n2}");panic!("network 2 is not level-1");}
-     if !n2.clone().is_binary() {panic!("network 2 is not binary");}
-     //easy cases
-    let x1 = n1.get_cluster(0);let x2 = n2.get_cluster(0);
-    let shared_x = x1.intersection(&x2).cloned().collect::<Vec<T>>().len();
-    let no_time = Instant::now().elapsed();
     if shared_x == 0 {
         panic!("networks must share at least 1 leaf label.")
     } 
@@ -156,15 +58,16 @@ pub fn find_cherry_distance_exact<T: Clone + PartialEq + Eq + Hash + Ord + Displ
     //processing
     let t1 = DTree::dep_tree_maker(&n1);
     let t2 = DTree::dep_tree_maker(&n2);
-    let pairs = DTree::make_pairs(&t1, &n1, &t2, &n2);
+    let mut pairs = DTree::make_pairs(&t1, &t2);
+    let mut thresh_num = cmp::max(1 , ( t_pc * pairs.len() as f32 ) as usize);
+    pairs.sort_by(|t1, t2| t2.1.tree.get_n().cmp( &t1.1.tree.get_n() ) );
+    //pairs sorted from largest to smallest. 
     //----------------------------DYNAMIC PROGRAMMING 
     //---------------------------INCLUDES BUILDING RT SUBNETS from DTREES
-    //start timer
-    let start = Instant::now();
     //go
     let n1_size = n1.get_n();
     let n2_size = n2.get_n();
-    let mut n_pairs = 0; let mut simple_size = 0;
+    let mut simple_size = 0;
     let mut all_nets_1:BTreeMap<String,Vec<Network<Node<T>>>> = BTreeMap::new();
     let mut all_nets_2:BTreeMap<String,Vec<Network<Node<T>>>> = BTreeMap::new();
     //processing
@@ -189,7 +92,93 @@ pub fn find_cherry_distance_exact<T: Clone + PartialEq + Eq + Hash + Ord + Displ
         //match each from set with each other
         for rt_n1 in &rt_n1_set {
             for rt_n2 in &rt_n2_set {
-                n_pairs+=1;
+                //simple_size = n_pairs;//just here for testing
+                if let Some(candidate_simple_size) = find_simple_macrs_size(rt_n1,rt_n2) {
+                    if thresh_num > 0 {
+                        if simple_size < candidate_simple_size {
+                          simple_size = candidate_simple_size;
+                        }
+                        thresh_num -= 1;
+                    } else {
+                        if simple_size < candidate_simple_size {
+                            simple_size = candidate_simple_size;
+                        }
+                        let result = n1_size + n2_size - 2 * simple_size;
+                        return (result/2).try_into().unwrap()
+                    }
+                }
+            }
+        }
+    }
+    //report results
+    let result = n1_size + n2_size - 2 * simple_size;
+    (result/2).try_into().unwrap()
+}
+//public function that returns distance via smart_enum
+pub fn find_cherry_distance_exact<T: Clone + PartialEq + Eq + Hash + Ord + Display>
+    (n1: Network<Node<T>>, n2: Network<Node<T>>) -> u32 { 
+    //----------error checking and easy case
+     //check n1
+     if !n1.clone().is_acyclic() {panic!("network 1 is not acyclic");}
+     if !n1.clone().is_level_1() {panic!("network 1 is not level-1");}
+     if !n1.clone().is_binary() {panic!("network 1 is not binary");}
+     //check n2
+     if !n2.clone().is_acyclic() {panic!("network 2 is not acyclic");}
+     if !n2.clone().is_level_1() {println!("{n2}");panic!("network 2 is not level-1");}
+     if !n2.clone().is_binary() {panic!("network 2 is not binary");}
+     //easy cases
+    let x1 = n1.get_cluster(0);let x2 = n2.get_cluster(0);
+    let shared_x = x1.intersection(&x2).cloned().collect::<Vec<T>>().len();
+    if shared_x == 0 {
+        panic!("networks must share at least 1 leaf label.")
+    } 
+    else if shared_x == 1 { 
+        let v1 = n1.get_n();
+        let v2 = n2.get_n();
+        //single-leaf network
+        return ((v1 + v2 - 2)/2).try_into().unwrap()
+    } else if shared_x == 2 {
+        let v1 = n1.get_n();
+        let v2 = n2.get_n();
+        //cherry network
+        return ((v1 + v2 - 6)/2).try_into().unwrap()
+    }
+    //------non-easy cases: more than 2 leaves are shared
+    //----------------------------PREPROCCESSING DTREES
+    //processing
+    let t1 = DTree::dep_tree_maker(&n1);
+    let t2 = DTree::dep_tree_maker(&n2);
+    let pairs = DTree::make_pairs(&t1, &t2);
+    //----------------------------DYNAMIC PROGRAMMING 
+    //---------------------------INCLUDES BUILDING RT SUBNETS from DTREES
+    //go
+    let n1_size = n1.get_n();
+    let n2_size = n2.get_n();
+    let mut simple_size = 0;
+    let mut all_nets_1:BTreeMap<String,Vec<Network<Node<T>>>> = BTreeMap::new();
+    let mut all_nets_2:BTreeMap<String,Vec<Network<Node<T>>>> = BTreeMap::new();
+    //processing
+    for (dt1, dt2) in pairs {
+        let key1 = dt1.make_key();
+        let key2 = dt2.make_key();
+        //find subnets for that subdtree, constructing them if not found
+        let rt_n1_set:Vec<Network<Node<T>>>;
+        let rt_n2_set:Vec<Network<Node<T>>>;
+        if all_nets_1.contains_key(&key1) {
+            rt_n1_set = all_nets_1.get(&key1).unwrap().clone();
+        } else {
+            rt_n1_set = dt1.rt_from_subd_maker(&t1,&n1);
+            all_nets_1.insert(key1,rt_n1_set.clone());
+        }
+        if all_nets_2.contains_key(&key2) {
+            rt_n2_set = all_nets_2.get(&key2).unwrap().clone();
+        } else {
+            rt_n2_set = dt2.rt_from_subd_maker(&t2,&n2);
+            all_nets_2.insert(key2,rt_n2_set.clone());
+        }
+        //match each from set with each other
+        for rt_n1 in &rt_n1_set {
+            for rt_n2 in &rt_n2_set {
                 if let Some(candidate_simple_size) = find_simple_macrs_size(rt_n1,rt_n2) {
                     if simple_size < candidate_simple_size {
                         simple_size = candidate_simple_size;
@@ -202,22 +191,6 @@ pub fn find_cherry_distance_exact<T: Clone + PartialEq + Eq + Hash + Ord + Displ
     let result = n1_size + n2_size - 2 * simple_size;
     (result/2).try_into().unwrap()
 }
-// --------------- find reduced set
-//for a given network, find the set of ret-trimmed subnetworks
-//i.e. the reduced set
-fn find_reduced_set<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: Network<Node<T>>) -> Vec<Network<Node<T>>> {
-        //pub fn find_reduced_set(net: Network<Node<String>>) -> Vec<Network<Node<String>>> {
-    //returns set of all reticulation-trimmed subnetworks 
-    let mut result = vec![];
-    let ret_edge_pairs = net.get_retic_edge_pairs();
-    let f_set = find_f_set(ret_edge_pairs);
-    for mut f in f_set {
-        if let Some(rt_subnet) = make_rt_subnet(&net, &mut f) {
-            result.push(rt_subnet);
-        } 
-    }
-    result
-}
 // --------------- rt subnet maker
 //given an F set and network, makes the ret-trimmed subnet
 fn make_rt_subnet<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: &Network<Node<T>>, f: &mut Vec<(usize,usize)>) -> Option<Network<Node<T>>> {
@@ -226,8 +199,6 @@ fn make_rt_subnet<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: &Networ
     let mut possible = true;
     let mut new_net = net.clone();
     let f = bu_top_sort(net, f); 
-    let mut start = Instant::now();
-    let mut elapsed;
     for (u,v) in &f {
         if new_net.is_bicon_root_of(*u,*v) {
             possible = false;
@@ -238,11 +209,6 @@ fn make_rt_subnet<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: &Networ
                                         .union(&new_net.get_rets_below(*v))
                                         .cloned().collect();
         rets_below.retain(|x| x != v);//we know v is a ret (below itself)
-        elapsed = start.elapsed();
-        //if debug {
-          //  println!("{:?} all rets below",elapsed);
-        //}
-        start = Instant::now();
         if rets_below.is_empty() {
             //remove retic edge
             new_net.remove_edge(*u,*v);
@@ -256,11 +222,6 @@ fn make_rt_subnet<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: &Networ
             //save old clusters
             let u_cluster = new_net.get_cluster(*u);
             let v_cluster = new_net.get_cluster(*v);
-            elapsed = start.elapsed();
-            //if debug {
-              //  println!("{:?} up to remove subnets",elapsed);
-            //}
-            start = Instant::now();
             //remove subnets
             new_net.remove_subnet(*u);
             new_net.remove_subnet(*v);
@@ -277,18 +238,10 @@ fn make_rt_subnet<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: &Networ
             new_net.add_edge(v_p,v_i);
             //update clusters
         } else {
-           // if debug {
-             //   println!("rets below empty");
-            //}
             possible = false;
             break;
         }
     }
-    elapsed = start.elapsed();
-    //if debug {
-      //  println!("{:?} to make network changes",elapsed);
-    //}
-    start = Instant::now();
     //--shrink reindex
     //if possible {
       //  let new_new_net = shrink_reindex(&new_net);
@@ -325,78 +278,57 @@ fn bu_top_sort<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: &Network<N
     result.reverse();
     result
 }
-///this method shrinks the network structure, assiming many "None" values are
+///this method shrinks the network structure, assuming many "None" values are
 /// introduced when removing subnetworks  
 /// used after trimming networks
-fn shrink_reindex<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: &Network<Node<T>>) -> Network<Node<T>> {
-    //creat reference mapping of old id to new id
-    let mut node_map = BTreeMap::new();//(k,v) = (old_i, new_i)
-    let mut i = 0;
-    for entry in &net.nodes {
-        if let Some(node) = entry {
-            //root is still 0
-            node_map.insert(node.get_id(),i);
-            i+=1;
-        }
-    }
-    //duplicate nodes
-    let mut new_nodes = vec![];
-    for (old_i,new_i) in &node_map {//iterates in order (k/v in same order)
-        let old_node = net.get_node_ref(*old_i);
-        let new_cluster = old_node.cluster.clone();
-        let new_labels = old_node.labels.clone();
-        let mut new_adjs = vec![];
-        for adj in &old_node.adjs {
-            new_adjs.push(
-                Adj {
-                    is_to: adj.is_to,
-                    i: node_map.get(&adj.i).unwrap().clone(),
-                }
-            );
-        }
-        let new_node = Node::new(*new_i, new_cluster, new_labels, new_adjs);
-        new_nodes.push(Some(new_node));//pushes in order of i!
-    }
-    //duplicate other data
-    let mut new_addn_edges = vec![];
-    for (old_a,old_b) in &net.addn_edges {
-        new_addn_edges.push( 
-            ( node_map.get(old_a).unwrap().clone(),
-            node_map.get(old_b).unwrap().clone() )
-            );
-    }
-    let mut new_nontriv_bicons: HashMap<usize, usize> = HashMap::new();
-    for (old_v, bicon_i) in &net.nontriv_bicons {
-        new_nontriv_bicons.insert( node_map.get(old_v).unwrap().clone() , *bicon_i );
-    }
-    //create and return the new network
-    Network {
-        nodes: new_nodes,
-        addn_edges: new_addn_edges,
-        nontriv_bicons: new_nontriv_bicons,
-    }
-}
-// ------------------- find f setss
-fn find_f_set(s: Vec<Vec<(usize,usize)>>) -> Vec<Vec<(usize,usize)>> {
-    //assume that s is a set of pairs
-    let mut results = vec![];
-    for set in one_of_each(s) {
-        let powerset = powerset(set);
-        for subset in powerset {
-            results.push(subset);
-        } 
-    }
-    results.sort();
-    results.dedup();
-    results
-}
-fn powerset(s:Vec<(usize,usize)>) -> Vec<Vec<(usize,usize)>> {
-    (0..2usize.pow(s.len() as u32)).map(|i| {
-             s.iter().enumerate().filter(|&(t, _)| (i >> t) % 2 == 1)
-                                 .map(|(_, element)| *element)
-                                 .collect()
-         }).collect()
-}
+// fn shrink_reindex<T: Clone + PartialEq + Eq + Hash + Ord + Display>(net: &Network<Node<T>>) -> Network<Node<T>> {
+//     //creat reference mapping of old id to new id
+//     let mut node_map = BTreeMap::new();//(k,v) = (old_i, new_i)
+//     let mut i = 0;
+//     for entry in &net.nodes {
+//         if let Some(node) = entry {
+//             //root is still 0
+//             node_map.insert(node.get_id(),i);
+//             i+=1;
+//         }
+//     }
+//     //duplicate nodes
+//     let mut new_nodes = vec![];
+//     for (old_i,new_i) in &node_map {//iterates in order (k/v in same order)
+//         let old_node = net.get_node_ref(*old_i);
+//         let new_cluster = old_node.cluster.clone();
+//         let new_labels = old_node.labels.clone();
+//         let mut new_adjs = vec![];
+//         for adj in &old_node.adjs {
+//             new_adjs.push(
+//                 Adj {
+//                     is_to: adj.is_to,
+//                     i: node_map.get(&adj.i).unwrap().clone(),
+//                 }
+//             );
+//         }
+//         let new_node = Node::new(*new_i, new_cluster, new_labels, new_adjs);
+//         new_nodes.push(Some(new_node));//pushes in order of i!
+//     }
+//     //duplicate other data
+//     let mut new_addn_edges = vec![];
+//     for (old_a,old_b) in &net.addn_edges {
+//         new_addn_edges.push( 
+//             ( node_map.get(old_a).unwrap().clone(),
+//             node_map.get(old_b).unwrap().clone() )
+//             );
+//     }
+//     let mut new_nontriv_bicons: HashMap<usize, usize> = HashMap::new();
+//     for (old_v, bicon_i) in &net.nontriv_bicons {
+//         new_nontriv_bicons.insert( node_map.get(old_v).unwrap().clone() , *bicon_i );
+//     }
+//     //create and return the new network
+//     Network {
+//         nodes: new_nodes,
+//         addn_edges: new_addn_edges,
+//         nontriv_bicons: new_nontriv_bicons,
+//     }
+// }
 fn one_of_each(matched_pairs:Vec<Vec<(usize,usize)>>) -> Vec<Vec<(usize,usize)>> {
     //generate all binary numbers of length n
     let n = matched_pairs.len();
@@ -424,7 +356,7 @@ fn one_of_each(matched_pairs:Vec<Vec<(usize,usize)>>) -> Vec<Vec<(usize,usize)>>
     }
     result
 }
-// ------------------- find simple distance DP DP
+// ------------------- find simple distance DP 
 fn find_simple_macrs_size<T: Clone + PartialEq + Eq + Hash + Ord + Display>(n1: &Network<Node<T>>, n2: &Network<Node<T>>) -> Option<usize> {
     //retuns Some<dist> with distance being the SIMPLE distance between inputs
     //returns None if simple distance cannot be found
@@ -720,7 +652,7 @@ impl DTree {
     }
     //-------------------------smart enum
     // ---------------enum
-    pub fn make_pairs<T: Clone + PartialEq + Eq + Hash + Ord + Display>(t1: &DTree, n1:&Network<Node<T>>, t2: &DTree, n2:&Network<Node<T>>) -> Vec<(DTree,DTree)> {
+    pub fn make_pairs(t1: &DTree, t2: &DTree) -> Vec<(DTree,DTree)> {
         //special use of labels and map in self. 
         //self labelled with corresponding index in t1. 
         //self map is (k,v)=(i in self, index of t2)
@@ -750,7 +682,7 @@ impl DTree {
         let mut ts = vec![t.clone()];
         let mut prev_lvl = vec![t.clone()];
         //a level is all trees of the same size
-        for i in 1..min_v {
+        for _ in 1..min_v {
             let mut next_lvl = vec![];
             for t in prev_lvl {
                 //for each unique t
@@ -802,8 +734,8 @@ impl DTree {
             id_i_map_2.insert(0,0);
             for v_node in &t.tree.nodes {
                 let v = v_node.as_ref().unwrap();
-                let mut v_1 = t.tree.get_label(v.i);
-                let mut v_2 = t.id_i_map.get(&v.i).unwrap();
+                let v_1 = t.tree.get_label(v.i);
+                let v_2 = t.id_i_map.get(&v.i).unwrap();
                 //for each vertex, add all its children
                 let v_chs = t.tree.get_children_i(v.i);
                 for v_ch in v_chs {
@@ -823,11 +755,11 @@ impl DTree {
                     id_i_map_2.insert(t2_ret, *v_ch_2);
                 }
             }
-            let mut new_t1 = DTree {
+            let new_t1 = DTree {
                 tree: tree1,
                 id_i_map: id_i_map_1,
             };
-            let mut new_t2 = DTree {
+            let new_t2 = DTree {
                 tree: tree2,
                 id_i_map: id_i_map_2,
             };
@@ -843,59 +775,6 @@ impl DTree {
         self.tree.find_cluster().iter().all(|s_l| n.tree.find_cluster().iter().any(|n_l| *s_l == *n_l ))
        
     } 
-    //----------------embeddings 
-    //pub fn all_embeddings_of(&self, gt:DTree) -> Vec<DTree> {
-      //  let mut wips:Vec<DTree> = vec![];
-        //build base DTree
-        //let mut new_id_i_map:HashMap<usize,usize> = HashMap::new();
-        //let mut root_label = BTreeSet::new();
-        //root_label.insert(0);
-        //new_id_i_map.insert(0,0);
-        //let mut new_nodes = vec![ Some( Node{ 
-          //                          i: 0,
-            //                        cluster: BTreeSet::new(),
-              //                      labels: root_label,
-                //                    adjs: vec![],
-                  //          } ) 
-        //]; 
-        ///let mut new_tree = Network{
-           // nodes: new_nodes,
-            //addn_edges: vec![],
-            //nontriv_bicons: HashMap::new(),
-        //};
-        //let new_dtree = DTree{id_i_map:new_id_i_map, tree:new_tree};
-        //TODO this will map all the subtrees too along the way??? 
-        //can I use this to my advantage? 
-        //wips.push(new_dtree);
-        //for _ in 0..gt.tree.nodes.len() {
-          //  let mut next_wips = vec![];
-        //}
-    //}
-    //pub fn all_embeddings_of_helper(&self, s_cur:usize, gt: DTree, gt_cur:usize, cur_tree: DTree) -> Vec<Option<DTree>> {
-      //  let gt_children = gt.tree.get_children_i(gt_cur);
-        //let self_children = self.tree.get_children_i(s_cur);
-        //let gt_child_count = gt_children.len();
-        //let self_child_count = self_children.len();
-        //if self_child_count < gt_child_count {
-            //what is none?
-          //  None//cannot make tree with these curs matching
-        //} 
-        //for self_child in self_children {
-          //  for gt_child in gt_children {
-            //    let label = self.get_id_from_i(self_child);
-              //  let new_cur_tree = cur_tree.clone();
-                //tree.add_leaf(self_child, label);
-                //new_net
-           // }
-       // }
-    //}
-    //pub fn all_noniso_embeddings_of(&self, dt: &DTree) -> Vec<(DTree,DTree)> {
-        //pairs of t'1 (self), t'2(dt)
-        //without actual isomorphisms, but rather all "same shapes"
-      //  let mut results = vec![];
-        //preprocess to determine "terminal vertices", all children mutual iso
-
-    //}
     // --------------- testing, building
     pub fn build_from_level_seq(seq: Vec<u16>) -> Self {
         let mut new_nodes = vec![];
@@ -941,12 +820,6 @@ impl DTree {
             }
             prev_i = *i;
         }
-        //update tree node type
-        for i in 0..new_tree.nodes.len() {
-            if new_tree.has_no_children(i) {
-                let mut node = new_tree.get_node_mut(i);
-            }
-        }
         //return the results
         DTree {
             tree: new_tree,
@@ -954,59 +827,7 @@ impl DTree {
         }
     }
     // --------------- trim dependency trees 
-    fn remove_i_generic(&self, i: usize) -> Vec<DTree> {
-        //checks all the way to remove i up to topological isomorphism
-        //labels dont matter and are not taken into account. 
-        if i >= self.tree.nodes.len() {
-            panic!("cannot reduce past singleton");
-        }
-        //(removed leaves so far, the resulting tree)
-        let mut wips: Vec<DTree> = vec![];
-        wips.push( self.clone() );
-        for _ in 0..i {
-            let mut next_wips = vec![];
-            while wips.len() > 0 {
-                let wip = wips.pop().unwrap();
-                for leaf in wip.tree.get_leaves() {
-                    let mut cur = wip.clone();
-                    cur.remove_leaf(leaf);
-                    if next_wips.iter().all(|t:&DTree| !t.is_shape_iso(0, &cur, 0)) {
-                        //check that cur is not shape isomorphic to any t already in next wips
-                        next_wips.push(cur);
-                    }
-                }
-            }
-            wips = next_wips;
-        }
-        wips
-    }
-    fn remove_i_labelled(&self, i: usize) -> Vec<DTree> {
-        //all the ways to remove i from a labelled network, considers labels
-        if i >= self.tree.nodes.len() {
-            panic!("cannot reduce past singleton");
-        }
-        //(removed leaves so far, the resulting tree)
-        let mut wips: Vec<(BTreeSet<usize>, DTree)> = vec![];
-        wips.push( (BTreeSet::new(),self.clone()) );
-        for _ in 0..i {
-            let mut next_wips = vec![];
-            while wips.len() > 0 {
-                let wip = wips.pop().unwrap();
-                for leaf in wip.1.tree.get_leaves() {
-                    let mut cur = wip.clone();
-                    cur.0.insert(leaf);
-                    if next_wips.iter().all(|(s,_):&(BTreeSet<usize>, DTree)| !(s.is_superset(&cur.0) && s.is_subset(&cur.0))) {
-                        //check that some other wip hasn't removed the same leaf set
-                        cur.1.remove_leaf(leaf);
-                        next_wips.push(cur);
-                    }
-                }
-            }
-            wips = next_wips;
-        }
-        let (_,results):(Vec<BTreeSet<usize>>,Vec<DTree>) = wips.into_iter().unzip();
-        results
-    }
+
     // -------------------- make rt subnets from sub dep tree
     fn rt_from_subd_maker<T: Clone + PartialEq + Eq + Hash + Ord + Display>(&self, dt: &DTree, n: &Network<Node<T>>) -> Vec<Network<Node<T>>> {
         //for some subdt self, make all rt_subnets and populate self. 
@@ -1059,9 +880,8 @@ impl DTree {
             }
         }
         //for each iteration, add the trivial f set
-        req_fsets.iter_mut().for_each(|mut x| x.extend( triv_fset.clone() ) );
+        req_fsets.iter_mut().for_each(|x| x.extend( triv_fset.clone() ) );
         //make rt subnets and populate subdt
-        let mut n_nets = 0;
         let mut results = vec![];
         for set in req_fsets {
             //println!("{:?}",set);
@@ -1069,7 +889,6 @@ impl DTree {
             //TODO set is supposed to be good!!! why would it return None?
             if let Some(cand_net) = make_rt_subnet(n, &mut set.clone()) {
                 results.push(cand_net);
-                n_nets+=1;
             }
         }
         results
@@ -1080,36 +899,7 @@ impl DTree {
         //keys are the ret id in net.
         self.id_i_map.keys().cloned().map( |i| i.to_string()).collect::<String>()
     }
-    fn remove_leaf(&mut self, leaf_i:usize) -> usize {
-        let binding = self.tree.get_labels(leaf_i);
-        let removed_id = binding.first().unwrap();
-        self.id_i_map.remove(removed_id);
-        self.tree.remove_leaf(leaf_i);
-        *removed_id
-    }
-    fn is_shape_iso(&self, self_cur:usize, t:&DTree, t_cur:usize) -> bool {
-        let self_child_count = self.tree.get_children_i(self_cur).len();
-        let t_child_count = t.tree.get_children_i(t_cur).len();
-        if self_child_count == 0 && t_child_count == 0 {
-            //base case both are leaves
-            true
-        } else if self_child_count == 0 || t_child_count == 0 {
-            //base fail one is leaf and other is not
-            false
-        } else if self_child_count == t_child_count {
-            //recursive case true
-            let s_childs = self.tree.get_children_i(self_cur);
-            let t_childs = t.tree.get_children_i(t_cur);
-            let mut both = s_childs.iter().zip(t_childs.iter());
-            both.all(|(s_c,t_c)| self.is_shape_iso(*s_c, t, *t_c) )
-        } else {
-            //recursive case fail
-            false
-        }
-    }
-    fn get_id_from_i(&self, i:usize) -> Option<usize> {
-        self.id_i_map.iter().find_map(|(key, &val)| if val == i { Some(key) } else { None }).copied()
-    } 
+
     pub fn get_children_i(&self, i:usize) -> Vec<usize> {
         self.tree.get_children_i(i)
     }

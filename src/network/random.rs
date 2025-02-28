@@ -1,6 +1,8 @@
 //! Random Submodule (of Network )
 //!
-//! Generates a random network topology that is level-1 and orchard
+//! Generates a random network topology that is level-1 and orchard possibly 
+//! given a level-order sequence. Generates a random tree from a given 
+//! label set `X`.
 //! 
 //! `random` submodule contains all functionality associated with generating 
 //! random trees and for attaching additional edges to form reticulations.
@@ -9,7 +11,6 @@
 use rand::{distributions::Uniform, Rng};
 use rand::thread_rng;//for shuffle
 use rand::seq::SliceRandom;//for shuffle
-use std::collections::BTreeSet;
 use std::cmp;
 //
 use crate::network::Network;
@@ -75,7 +76,7 @@ pub fn new_random_tree_from_x(size: usize, mut x: Vec<String>) -> Network<Node<S
         rands.push(rng.sample(dist));
     } 
     //------------------------build tree
-    let mut result: Network<Node<String>> = Network::new(size);
+    let result: Network<Node<String>> = Network::new(size);
     //build tree
     x.shuffle(&mut thread_rng());
     let mut tree = new_random_tree_from_x_helper(&rands, &x, result, 0, size, 0);
@@ -101,13 +102,10 @@ fn new_random_tree_from_x_helper(
     par_i: usize,
 ) -> Network<Node<String>> {
     //assumes x is already shuffled
-    let mut rng = rand::thread_rng();
-    let dist = Uniform::from(0usize..usize::MAX);
     //assumes Network will not be singleton
     if cur_size < 2 {//BASE CASE
         //create leaf and fill cur_node position in Network
         //choose from x and remove it
-        let rand_i = rng.sample(dist);
         let rand_label = cur_x[0].clone();
         let ( _ , cur_x) = cur_x.split_at(1);//remove label once used
         cur_net.add_leaf(cur_index, rand_label);

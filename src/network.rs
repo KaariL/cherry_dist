@@ -13,8 +13,6 @@ use std::collections::HashMap;
 use std::collections::BTreeSet;
 use rand::Rng;
 use rand::distributions::Uniform;
-use std::time::Duration;
-use crate::network::distance::DTree;
 
 
 pub mod random;//PUB for testing
@@ -53,7 +51,7 @@ pub struct Node<T: Clone + PartialEq + Eq + Hash + Ord + Display> {
     adjs: Vec<Adj>,
 }
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct Adj {
+struct Adj {
     is_to: bool,//true when adj is child to v
     i: usize,//ID of adjacent node;
 }
@@ -86,15 +84,17 @@ impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> Network<Node<T>> {
     /// # Arguments
     /// * `n1` - input network 1
     /// * `n2` - input network 2
+    /// * `is_rank` - boolean determines if ranking heuristic is used
     /// input networks must have at least 1 leaf in common
     /// additionally outputs extra information, mainly runtime of steps
-    pub fn find_cherry_distance(n1: Self, n2: Self) -> u32 {
+    pub fn find_cherry_distance(n1: Self, n2: Self, is_rank:bool) -> u32 {
         //Uses default threshold of 50%
-        //if is_exact {
+        if is_rank {
+            distance::find_cherry_distance_w_ranking(n1,n2,0.5)
+        } else {
             distance::find_cherry_distance_exact(n1,n2)
-        //} else {
-            //distance::find_cherry_distance_w_ranking(n1,n2,0.5)
-        //}
+            
+        }
         
     }
     fn add_leaf(&mut self, i: usize, label: T) {
@@ -210,12 +210,6 @@ impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> Network<Node<T>> {
         }//establishes they are all in bicon r. 
         xi
     }
-    fn remove_leaf(&mut self, leaf_i: usize) {
-        //used on DTrees, return value is id
-        let leaf_p = self.get_parents_i(leaf_i)[0];
-        self.remove_edge(leaf_p,leaf_i);
-        self.nodes.replace_w_none(leaf_i);
-    }
     fn remove_subnet(&mut self, v: usize) {
         //if self.nontriv_bicons.contains_key(&v) {
             //panic!("Cannot remove subnet of vertex in a non-trivial biconnected component.")
@@ -298,19 +292,6 @@ impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> Network<Node<T>> {
         }
         result
     }
-    fn get_retic_edge_pairs(&self) -> Vec<Vec<(usize,usize)>> {
-        let mut result:Vec<Vec<(usize,usize)>> = vec![];
-        for (v,r) in &self.addn_edges {
-            let parents = self.get_parents_i(*r);
-            let a = parents[0]; let b = parents[1];
-            if a != *v {
-                result.push(vec![(a,*r),(*v,*r)]);
-            } else {
-                result.push(vec![(b,*r),(*v,*r)]);
-            }
-        }
-        result
-    }
     fn get_rets_below(&self, v: usize) -> BTreeSet<usize> {
         //a ret is not below itself??
         //a ret is not below itself??
@@ -345,9 +326,6 @@ impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> Network<Node<T>> {
             }
         }
         results
-    }
-    fn get_leaves_count(&self) -> usize {
-        self.get_node_ref(0).cluster.len()
     }
     fn get_node_ref(&self, i: usize) -> &Node<T> {
         if self.nodes.len() <= i { panic!("cannot get node: i too large"); }
@@ -632,9 +610,6 @@ impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> Network<Node<T>> {
     fn is_leaf_node(&self, node_i:usize) -> bool {
         self.get_node_ref(node_i).is_leaf()
     }
-    fn is_tree_node(&self, node_i:usize) -> bool {
-        self.get_node_ref(node_i).is_tree()
-    }
     fn is_tree(&self) -> bool {
         self.addn_edges.is_empty()
     }
@@ -889,7 +864,7 @@ impl Network<Node<String>> {
 //  ----------------------  Network Display
 impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> std::fmt::Display for Network<Node<T>> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut result;
+        let result;
         if self.nodes[0].is_none() {
             result = String::from("Network without root");
         } else {
@@ -909,15 +884,6 @@ impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> std::fmt::Display for Net
 
 //   ------------------------------- NODE
 impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> Node<T> {
-    //Constructors
-    fn new(i:usize, cluster: BTreeSet<T>, labels: BTreeSet<T>, adjs: Vec<Adj>) -> Self {
-        Node {
-            i: i,
-            cluster: cluster,
-            labels: labels,
-            adjs: adjs,
-        }
-    }
     fn new_leaf(i: usize, labels: BTreeSet<T>) -> Self {
         Node {
             i: i,
