@@ -122,6 +122,9 @@ fn call_gen_mode(debug:bool,
     if debug {
         println!("Network 1: {n1}");
         println!("Network 2: {n2}");
+        if rank {
+            println!("Default ranking threshold value: 0.5");
+        }
     }
     dist = Network::find_cherry_distance(n1,n2,rank);      
     //last output
@@ -132,7 +135,7 @@ fn call_read_mode(debug:bool, rank:bool, new1: String, new2: String) {
     let n2 = Network::parse_newick(&new2);
     //calculate distance
     if debug {
-        println!("Default threshold value: 0.5");
+        println!("Default ranking threshold value: 0.5");
     }
     let dist = Network::find_cherry_distance(n1,n2,rank);
     //last output
