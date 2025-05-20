@@ -1,5 +1,5 @@
 #![allow(warnings)]
-use cherry_dist::network::Network;
+use cherry_red::network::Network;
 use std::fs;
 use std::env;
 fn main() {
@@ -8,7 +8,8 @@ fn main() {
     let mut is_debug = false;
     let mut is_exact = false;
     let is_gen_mode;
-    let mut is_rank_mode = false;
+    let mut is_rank = false;
+    let mut rank_t_opt: Option<f32> = Some(0.5);
     let mut req_args: Vec<&str> = vec![];
     //       --------------             parse command
     match args[1].as_str() {
@@ -17,24 +18,36 @@ fn main() {
         _ => {help("error: provide command for mode.");return},
     }
     //    -------------          parse option flags
-    //short form and long form, in alphabetical order
+    //short form and long form
     for (i,arg) in args.iter().enumerate() {
         if i == 0 || i == 1 {
             continue;
         }
+        let mut v: Vec<&str> = arg.split('=').collect();
+        v[0] = v[0].trim_start_matches('-');
         if arg.starts_with("--") {
-            let option = arg.as_str().trim_start_matches('-');
-            println!("option: {option}");//todo doesn't do anything!
+            match v[0] {
+                "debug" => is_debug = true,
+                "verbose" => is_debug = true,
+                "exact" => is_exact = true,
+                "rank" => {is_rank = true;
+                        if let Some(e)= v.get(1) {
+                            rank_t_opt = Some(e.parse::<f32>().unwrap());
+                        }},
+                "help" => {help("printing help...");return},
+                _ => {help("unknown flag encountered"); return},
+            }
         } else if arg.starts_with('-') {
-            let options = arg.trim_start_matches('-');
-            for c in options.chars() {
+            for c in v[0].chars() {
                 match c {
                     'd' => is_debug = true,
                     'v' => is_debug = true,//legacy "verbose"
                     'e' => is_exact = true,
-                    'r' => is_rank_mode = true,
+                    'r' => {is_rank = true;
+                        if let Some(e)= v.get(1) {
+                            rank_t_opt = Some(e.parse::<f32>().unwrap());
+                        }},
                     'h' => {help("printing help...");return},
-                    'm' => {println!("Use command `cargo docs --open`");},//TODO
                     _ => {print!("{c} ");help("unknown flag encountered"); return},
                 }
             }
@@ -60,7 +73,11 @@ fn main() {
             }
         }
         //      ------------   gen   call distance with given args and options 
-        call_gen_mode(is_debug, is_exact, is_rank_mode, leaves, reticulations, distance);
+        if is_rank {
+            call_gen_mode(is_debug, is_exact, rank_t_opt, leaves, reticulations, distance);
+        } else {
+            call_gen_mode(is_debug, is_exact, None, leaves, reticulations, distance);
+        }
     } else {
         if req_args.len() != 2 {
             help("Not the required number of arguments for extended newick format string parser mode"); return
@@ -76,7 +93,11 @@ fn main() {
             Err(_) => {help("Could not read file 2."); return}
         };
         // ---------   read    call distance with selected options and arguments
-        call_read_mode(is_debug, is_rank_mode, newick1, newick2);
+        if is_rank {
+            call_read_mode(is_debug, rank_t_opt, newick1, newick2);
+        } else {
+            call_read_mode(is_debug, None, newick1, newick2);
+        }
     }
 }
 fn help(message: &str) {
@@ -96,48 +117,51 @@ fn help(message: &str) {
 
     USAGE
     1. random reneration mode
-    usage: ./cherry-dist gen [options] <leaves> <reticulations> <distance> 
+    usage: gen [options] <leaves> <reticulations> <distance> 
 
     2. extended newick format string parsing mode
-    usage: ./cherry-dist read [options] <file1> <file2>
+    usage: read [options] <file1> <file2>
     
     OPTIONS
-    -r     option available in any mode which specifies that the ranking heuristic mode should be used
-    -d     at present, debug only available in gen mode, prints out the generated random networks
-    -e     option only available on random generation mode, specifies that the exact number of reticulations requested should be reached in randomly generated network, note this may increase runtime
-    -h     print this help guide   
-    -m     links to version of manual on web
+    -r     Rank, any mode, which specifies that the ranking heuristic mode should be used. The program calculates cherry distance exactly by default, this is the optional, inexact, faster calculation. 
+    -d     Debug, `gen` mode, prints out the generated random networks.
+    -e     Exact, `gen` mode, specifies that the exact number of reticulations requested should be reached in randomly generated network, note this may increase runtime.
+    -h     Help, any mode, print this help guide.   
 
     ");
 }
 fn call_gen_mode(debug:bool, 
                 exact:bool, 
-                rank: bool,
+                rank_t_opt: Option<f32>,
                 leaves:usize, 
                 reticulations:usize, 
                 distance:usize) {
     let dist;
     let n1 = Network::new_random(leaves, reticulations,exact);
     let (n1, n2) = Network::random_modify(n1, distance);
-    if debug {
+    if debug {//only prints when rank is activated
         println!("Network 1: {n1}");
         println!("Network 2: {n2}");
-        if rank {
-            println!("Default ranking threshold value: 0.5");
+        if let Some(rank_t) = rank_t_opt {
+            println!("Ranking threshold value: {}",rank_t);
         }
     }
-    dist = Network::find_cherry_distance(n1,n2,rank);      
+    dist = Network::find_cherry_distance(n1,n2,rank_t_opt);      
     //last output
     println!("Cherry distance of random networks: {dist}");
 }
-fn call_read_mode(debug:bool, rank:bool, new1: String, new2: String) {
+fn call_read_mode(debug:bool, rank_t_opt:Option<f32>, new1: String, new2: String) {
     let n1 = Network::parse_newick(&new1);
     let n2 = Network::parse_newick(&new2);
     //calculate distance
     if debug {
-        println!("Default ranking threshold value: 0.5");
+        println!("Parsed network 1: {n1}");
+        println!("Parsed network 2: {n2}");
+        if let Some(rank_t) = rank_t_opt {//only prints when rank is activated
+            println!("Ranking threshold value: {}",rank_t);
+        }
     }
-    let dist = Network::find_cherry_distance(n1,n2,rank);
+    let dist = Network::find_cherry_distance(n1,n2,rank_t_opt);
     //last output
     println!("Cherry distance of newick networks: {dist}");
 }

@@ -5,7 +5,7 @@
 //! `network` module contains all network functionality including modules for 
 //! building and modifying networks
 //! 
-//! This module contains 2 mains types: `Network<Node<T>>`, `Node<T>`
+//! This module contains 2 main types: `Network<Node<T>>`, `Node<T>`
 //! 
 use std::hash::Hash;
 use std::fmt::Display;
@@ -50,6 +50,7 @@ pub struct Node<T: Clone + PartialEq + Eq + Hash + Ord + Display> {
     ///the adjacencies including arc direction of this node
     adjs: Vec<Adj>,
 }
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct Adj {
     is_to: bool,//true when adj is child to v
@@ -84,18 +85,15 @@ impl<T: Clone + PartialEq + Eq + Hash + Ord + Display> Network<Node<T>> {
     /// # Arguments
     /// * `n1` - input network 1
     /// * `n2` - input network 2
-    /// * `is_rank` - boolean determines if ranking heuristic is used
+    /// * `rank_t_opt` - Option<f32> determines if ranking heuristic is used
     /// input networks must have at least 1 leaf in common
     /// additionally outputs extra information, mainly runtime of steps
-    pub fn find_cherry_distance(n1: Self, n2: Self, is_rank:bool) -> u32 {
-        //Uses default threshold of 50%
-        if is_rank {
-            distance::find_cherry_distance_w_ranking(n1,n2,0.5)
+    pub fn find_cherry_distance(n1: Self, n2: Self, rank_t_opt:Option<f32>) -> u32 {
+        if let Some(rank_t) = rank_t_opt {
+            distance::find_cherry_distance_w_ranking(n1,n2,rank_t)
         } else {
             distance::find_cherry_distance_exact(n1,n2)
-            
         }
-        
     }
     fn add_leaf(&mut self, i: usize, label: T) {
         let mut labels = BTreeSet::new();
